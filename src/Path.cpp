@@ -70,7 +70,7 @@ void Path::curveTo(Point b, Point c, Point d) {
     }
 }
 
-void Path::scanLine(double y, double xFirst, double spacing, int length, uint8_t* results) {
+void Path::scanLine(double y, double xFirst, double spacing, int length, const int subSamples, uint8_t* results) {
     std::vector<double> intersections;
 
     for (size_t i = 0; i + 1 < points.size(); i += 2) {
@@ -84,9 +84,9 @@ void Path::scanLine(double y, double xFirst, double spacing, int length, uint8_t
     if (intersections.size() > 1) {
         std::sort(intersections.begin(), intersections.end());
         for (size_t i = 0; i + 1 < intersections.size(); i += 2) {
-            int firstPixel = std::max(0, static_cast<int>(intersections[i] / spacing));
-            int lastPixel = std::min(length, static_cast<int>(intersections[i + 1] / spacing));
-            for (int pixel = firstPixel; pixel < lastPixel; ++pixel) results[pixel] = 0x00;
+            int firstPixel = std::max(0, static_cast<int>(subSamples * intersections[i] / spacing));
+            int lastPixel = std::min(length * subSamples, static_cast<int>(subSamples * intersections[i + 1] / spacing));
+            for (int pixel = firstPixel; pixel < lastPixel; ++pixel) results[pixel / subSamples]++;
         }
     }
 }

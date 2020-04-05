@@ -5,6 +5,7 @@
 #include "LCDElements.h"
 #include "Path.h"
 
+const int SUB_SAMPLES = 5;
 
 class LcdElementTexture {
 protected:
@@ -56,11 +57,14 @@ public:
         SDL_LockSurface(surface);
         auto row = std::make_unique<uint8_t[]>(pixelW);
         for (int y = 0; y < pixelH; ++y) {
-            memset(row.get(), 0xFF, pixelW);
-            p.scanLine(puTop + y * scale, puLeft, scale, pixelW, row.get());
+            memset(row.get(), 0x00, pixelW);
+            for (int subY = 0; subY < SUB_SAMPLES; ++subY) {
+                p.scanLine(puTop + y * scale + (scale * subY) / SUB_SAMPLES, puLeft, scale, pixelW, SUB_SAMPLES, row.get());
+            }
             int* line = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(surface->pixels) + (y * surface->pitch));
             for (int x = 0; x < pixelW; ++x) {
-                line[x] = 0x00000000 | (~row.get()[x] << 24);
+                uint32_t value = 0xFF * row[x] / (SUB_SAMPLES * SUB_SAMPLES);
+                line[x] = 0x00000000 | (value << 24);
             }
         }
         SDL_UnlockSurface(surface);
@@ -111,12 +115,15 @@ int main(int argc, char* argv[]) {
                 if (event.type == SDL_KEYDOWN) {
                     finished = finished || event.key.keysym.sym == SDLK_q;
                 }
+                else if (event.type == SDL_QUIT) {
+                    finished = true;
+                }
             }
             if (finished)
                 break;
             SDL_SetRenderDrawColor(renderer, 0x80, 0x80, 0x80, 0xFF);
             SDL_RenderClear(renderer);
-            body.render(renderer, pos);
+            body.render(renderer, 1);
             SDL_RenderPresent(renderer);
         }
     }

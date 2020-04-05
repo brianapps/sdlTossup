@@ -29,7 +29,7 @@ public:
         lineTo(first);
     }
 
-    void scanLine(double y, double xFirst, double spacing, int length, uint8_t* results);
+    void scanLine(double y, double xFirst, double spacing, int length, int subSamples, uint8_t* results);
 };
 
 #endif  // PATH_H_
