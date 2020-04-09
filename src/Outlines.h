@@ -3,6 +3,8 @@
 #ifndef OUTLINES_H_
 #define OUTLINES_H_
 
+#include <cstddef>
+
 namespace Outlines {
 
 struct Node {
