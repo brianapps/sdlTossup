@@ -2,10 +2,33 @@
 #include <iostream>
 #include <memory>
 #include <cstring>
-#include "LCDElements.h"
 #include "Path.h"
+#include "outlines.h"
 
-const int SUB_SAMPLES = 5;
+
+void addOutlineToPath(Path& path, int id) {
+    auto node = Outlines::ALL_OUTLINES[id];
+
+    while (node->action != 'X') {
+        if (node->action == 'M') {
+            path.moveTo({ node->x, node->y });
+            ++node;
+        }
+        else if (node->action == 'L') {
+            path.lineTo({ node->x, node->y });
+            ++node;
+        }
+        else if (node->action == 'S' || node->action == 'A') {
+            path.curveTo({ node->x, node->y }, { node[1].x, node[1].y }, { node[2].x, node[2].y });
+            node += 3;
+        }
+    }
+}
+
+
+const int SUB_SAMPLES = 4;
+
+namespace o = Outlines;
 
 class LcdElementTexture {
 protected:
@@ -17,41 +40,25 @@ public:
         if (texture != nullptr) SDL_DestroyTexture(texture);
     }
 
-    void create(SDL_Renderer* renderer, int lcdElementId) {
+    void create(SDL_Renderer* renderer, int outlineID) {
         if (texture != nullptr) {
             SDL_DestroyTexture(texture);
             texture = nullptr;
         }
 
         Path p;
-        size_t nodeIndex = LCDElements[lcdElementId];
-        for (;;) {
-            const auto& node = LCDOutlineNodes[nodeIndex];
-            if ((node.flags & OUTLINE_MOVE) != 0)
-                p.moveTo({ node.x, node.y });
-            else if ((node.flags & OUTLINE_LINE) != 0)
-                p.lineTo({ node.x, node.y });
-            else if ((node.flags & OUTLINE_CONTROL) != 0) {
-                const auto& node2 = LCDOutlineNodes[++nodeIndex];
-                const auto& node3 = LCDOutlineNodes[++nodeIndex];
-                p.curveTo({ node.x, node.y }, { node2.x, node2.y }, { node3.x, node3.y });
-            }
-            if ((node.flags & OUTLINE_CLOSE) != 0) p.close();
-
-            if ((LCDOutlineNodes[nodeIndex].flags & OUTLINE_FILL) != 0) break;
-            nodeIndex++;
-        }
+        addOutlineToPath(p, outlineID);
 
         double height = p.bottomBound - p.topBound;
         double width = p.rightBound - p.leftBound;
 
-        int pixelH = 900;
+        int pixelH = 800;
         // number of path units per pixel
-        double scale = height / (static_cast<double>(pixelH) - 20);
-        int pixelW = static_cast<int>(20 + width / scale);
+        double scale = height / (static_cast<double>(pixelH) - 4);
+        int pixelW = static_cast<int>(4 + width / scale);
 
-        double puTop = p.topBound - 10 * scale;
-        double puLeft = p.leftBound - 10 * scale;
+        double puTop = p.topBound - 2 * scale;
+        double puLeft = p.leftBound - 2 * scale;
 
         SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, pixelW, pixelH, 32, SDL_PIXELFORMAT_RGBA32);
         SDL_LockSurface(surface);
@@ -88,7 +95,7 @@ public:
 int main(int argc, char* argv[]) {
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
 
-    SDL_Window* window = SDL_CreateWindow("Test", 0, 0, 1920, 1080, SDL_WINDOW_BORDERLESS);
+    SDL_Window* window = SDL_CreateWindow("Test", 0, 0, 1920, 1080, SDL_WINDOW_BORDERLESS); 
     if (window == nullptr) {
         std::cout << "Error" << std::endl;
         return 1;
@@ -104,7 +111,7 @@ int main(int argc, char* argv[]) {
 
     {
         LcdElementTexture body;
-        body.create(renderer, LCD_BODY);
+        body.create(renderer, o::LEFT_SPLAT);
         SDL_Event event;
 
         bool finished = false;

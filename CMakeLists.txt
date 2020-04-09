@@ -12,7 +12,7 @@ link_directories(/opt/vc/lib)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY  ${CMAKE_BINARY_DIR})
 add_subdirectory(external/SDL2-2.0.12)
-add_executable(SDLTossup src/main.cpp src/LCDElements.cpp src/Path.cpp src/Point.h src/Path.h src/LCDElements.h)
+add_executable(SDLTossup src/main.cpp  src/Path.cpp src/Point.h src/Path.h src/Outlines.cpp src/Outlines.h)
 target_link_libraries(SDLTossup SDL2 SDL2main)
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # silence GCC or raspberry pi about using std::sort and the abi having changed
