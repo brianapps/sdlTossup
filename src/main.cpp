@@ -27,77 +27,16 @@ void addOutlineToPath(Path& path, int id) {
 }
 
 namespace o = Outlines;
+/*
+uint32_t LCD_ON = 0x00000000;
+uint32_t LCD_OFF = 0x80808000;
+*/
 
-class LcdElementTexture {
-protected:
-    SDL_Texture* texture = nullptr;
-    SDL_Surface* surface = nullptr;
-    int textureWidth, textureHeight;
-
-    SDL_Rect dest;
+class Bounds {
+private:
+    int xMin, xMax, yMin, yMax;
 
 public:
-    ~LcdElementTexture() {
-        if (texture != nullptr)
-            SDL_DestroyTexture(texture);
-        if (surface != nullptr) 
-            SDL_FreeSurface(surface);
-    }
-
-        void createSurface(int outlineID, int subSamples, double pathUnitsPerPixel, double originX, double originY) {
-            if (surface != nullptr)
-                SDL_FreeSurface(surface);
-
-            Path p;
-            addOutlineToPath(p, outlineID);
-
-            dest.x = static_cast<int>(std::floor((p.leftBound - originX) / pathUnitsPerPixel));
-            int right = static_cast<int>(std::ceil((p.rightBound - originX) / pathUnitsPerPixel));
-            dest.y = static_cast<int>(std::floor((p.topBound - originY) / pathUnitsPerPixel));
-            int bottom = static_cast<int>(std::ceil((p.bottomBound - originY) / pathUnitsPerPixel));
-
-            dest.w = right - dest.x;
-            dest.h = bottom - dest.y;
-
-            double puLeft = originX + (dest.x * pathUnitsPerPixel);
-            double puTop = originY + (dest.y * pathUnitsPerPixel);
-
-            surface = SDL_CreateRGBSurfaceWithFormat(0, dest.w, dest.h, 32, SDL_PIXELFORMAT_RGBA32);
-            SDL_LockSurface(surface);
-            auto row = std::make_unique<uint8_t[]>(dest.w);
-            for (int y = 0; y < dest.h; ++y) {
-                memset(row.get(), 0x00, dest.w);
-                for (int subY = 0; subY < subSamples; ++subY) {
-                    p.scanLine(puTop + y * pathUnitsPerPixel + (pathUnitsPerPixel * subY) / subSamples, puLeft,
-                        pathUnitsPerPixel, dest.w, subSamples, row.get());
-                }
-                int* line = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(surface->pixels) + (y * surface->pitch));
-                for (int x = 0; x < dest.w; ++x) {
-                    uint32_t value = 0xFF * row[x] / (subSamples * subSamples);
-                    line[x] = 0x00000000 | (value << 24);
-                }
-            }
-            SDL_UnlockSurface(surface);
-        }
-
-    void createTexture(SDL_Renderer* renderer)
-    {
-        if (texture != nullptr)
-            SDL_DestroyTexture(texture);
-        texture = SDL_CreateTextureFromSurface(renderer, surface);
-        if (texture == nullptr) {
-            std::cerr << "Texture creation failed: " << SDL_GetError() << std::endl;
-        }
-        SDL_FreeSurface(surface);
-    }
-
-    void render(SDL_Renderer* renderer) {
-        SDL_RenderCopy(renderer, texture, nullptr, &dest);
-    }
-};
-
-struct Bounds {
-    int xMin, xMax, yMin, yMax;
     double pathUnitsPerPixel;
     double xo, yo;
 
@@ -112,14 +51,140 @@ struct Bounds {
             yMax = std::max(yMax, node->y);
         }
 
-        double sx = (xMax - xMin) / static_cast<double>(width);
-        double sy = (yMax - yMin) / static_cast<double>(height);
+        double sx = (static_cast<double>(xMax) - xMin) / width;
+        double sy = (static_cast<double>(yMax) - yMin) / height;
 
         pathUnitsPerPixel = std::max(sx, sy);
         xo = (static_cast<double>(xMin) + xMax - pathUnitsPerPixel * width) / 2.0;
         yo = (static_cast<double>(yMin) + yMax - pathUnitsPerPixel * height) / 2.0;
     }
+
+    double pixelXToPath(double x) const {
+        return x * pathUnitsPerPixel + xo;
+    }
+
+    double pathXToPixel(double x) const {
+        return (x - xo) / pathUnitsPerPixel;
+    }
+
+    double pixelYToPath(double y) const {
+        return y * pathUnitsPerPixel + yo;
+    }
+
+    double pathYToPixel(double y) const {
+        return (y - yo) / pathUnitsPerPixel;
+    }
+
+
 };
+
+struct ElementParameters {
+    int subSamples;
+    Bounds bounds;
+    uint32_t onColour;
+    uint32_t offColour;
+};
+
+
+class LcdElementTexture {
+protected:
+    SDL_Texture* texture = nullptr;
+    SDL_Surface* surface = nullptr;
+    SDL_Rect dest;
+
+public:
+    ~LcdElementTexture() {
+        if (texture != nullptr)
+            SDL_DestroyTexture(texture);
+        if (surface != nullptr)
+            SDL_FreeSurface(surface);
+    }
+
+    void createSurface(int outlineID, const ElementParameters& elementParameters) {
+        if (surface != nullptr)
+            SDL_FreeSurface(surface);
+
+        Path p;
+        addOutlineToPath(p, outlineID);
+
+        dest.x = static_cast<int>(std::floor(elementParameters.bounds.pathXToPixel(p.leftBound)));
+        int right = static_cast<int>(std::ceil(elementParameters.bounds.pathXToPixel(p.rightBound)));
+        dest.y = static_cast<int>(std::floor(elementParameters.bounds.pathYToPixel(p.topBound)));
+        int bottom = static_cast<int>(std::ceil(elementParameters.bounds.pathYToPixel(p.bottomBound)));
+
+        dest.w = right - dest.x;
+        dest.h = bottom - dest.y;
+
+        const double puLeft = elementParameters.bounds.pixelXToPath(dest.x);
+        //double puTop = elementParameters.originY + (dest.y * elementParameters.pathUnitsPerPixel);
+
+        surface = SDL_CreateRGBSurfaceWithFormat(0, dest.w, dest.h, 32, SDL_PIXELFORMAT_RGBA32);
+        SDL_LockSurface(surface);
+        auto row = std::make_unique<uint8_t[]>(dest.w);
+        const uint32_t sub2 = elementParameters.subSamples * elementParameters.subSamples;
+        for (int y = 0; y < dest.h; ++y) {
+            memset(row.get(), 0x00, dest.w);
+            for (int subY = 0; subY < elementParameters.subSamples; ++subY) {
+                double pathY = elementParameters.bounds.pixelYToPath(y + dest.y + static_cast<double>(subY) / elementParameters.subSamples);
+                p.scanLine(pathY, puLeft, elementParameters.bounds.pathUnitsPerPixel, dest.w, elementParameters.subSamples, row.get());
+            }
+            int* line = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(surface->pixels) + (y * surface->pitch));
+            for (int x = 0; x < dest.w; ++x) {
+                uint32_t blend1 = (0x100 * row[x]) / sub2;
+                uint32_t blend2 = 0x100 - blend1;
+
+
+                uint32_t cbr = ((elementParameters.onColour & 0xFF00FF) * blend1 + (elementParameters.offColour & 0xFF00FF) * blend2) >> 8;
+                uint32_t cg = ((elementParameters.onColour & 0xFF00) * blend1 + (elementParameters.offColour & 0xFF00) * blend2) >> 8;
+                uint32_t value = (cbr & 0xFF00FF) | (cg & 0xFF00);
+
+
+                if (row[x] == 0)
+                    line[x] = value;
+                else
+                    line[x] = 0xFF000000 | value;
+            }
+        }
+        SDL_UnlockSurface(surface);
+
+    }
+
+    void createTexture(SDL_Renderer* renderer) {
+        if (texture != nullptr)
+            SDL_DestroyTexture(texture);
+        texture = SDL_CreateTextureFromSurface(renderer, surface);
+        if (texture == nullptr) {
+            std::cerr << "Texture creation failed: " << SDL_GetError() << std::endl;
+        }
+        SDL_FreeSurface(surface);
+        surface = nullptr;
+    }
+
+    void setBlendMode(SDL_BlendMode blendMode) {
+        SDL_SetTextureBlendMode(texture, blendMode);
+    }
+
+    void render(SDL_Renderer* renderer) {
+        SDL_RenderCopy(renderer, texture, nullptr, &dest);
+    }
+
+    void renderWithInset(SDL_Renderer* renderer, int inset) {
+        SDL_Rect s;
+        s.x = inset;
+        s.y = inset;
+        s.w = dest.w - inset * 2;
+        s.h = dest.h - inset * 2;
+        SDL_Rect d;
+        d.x = dest.x + inset;
+        d.y = dest.y + inset;
+        d.w = s.w;
+        d.h = s.h;
+        SDL_RenderCopy(renderer, texture, &s, &d);
+    }
+
+};
+
+
 
 class GameState {
 private:
@@ -129,10 +194,9 @@ private:
 
     struct Worker {
         GameState* game;
-        Bounds bounds;
+        ElementParameters elementParameters;
         SDL_Renderer* renderer;
         SDL_atomic_t textureIndex;
-        int subSamples;
 
         static int start(void* data) {
             return reinterpret_cast<Worker*>(data)->run();
@@ -143,7 +207,7 @@ private:
                 int i = SDL_AtomicAdd(&textureIndex, 1);
                 if (i >= o::COUNT)
                     return 0;
-                game->textures[i].createSurface(i, subSamples, bounds.pathUnitsPerPixel, bounds.xo, bounds.yo);
+                game->textures[i].createSurface(i, elementParameters);
             }
         }
     };
@@ -152,31 +216,25 @@ public:
     void createTextures(SDL_Renderer* renderer, int screenW, int screenH, int subSamples) {
         Worker worker;
         worker.game = this;
-        worker.bounds.computeBounds(screenW, screenH);
+        worker.elementParameters.bounds.computeBounds(screenW, screenH);
+        worker.elementParameters.offColour = 0x808080;
+        worker.elementParameters.onColour = 0x101080;
+
+        worker.elementParameters.subSamples = subSamples;
         worker.renderer = renderer;
         SDL_AtomicSet(&worker.textureIndex, 0);
-        worker.subSamples = subSamples;
-
-        //worker.run();
-
-        
         SDL_Thread* threads[8];
         size_t NUM_THREADS = std::min(SDL_GetCPUCount(), 8);
         std::cout << "Using " << NUM_THREADS << " threads." << std::endl;
         for (size_t i = 0; i < NUM_THREADS; ++i) threads[i] = SDL_CreateThread(Worker::start, "textures", &worker);
         for (size_t i = 0; i < NUM_THREADS; ++i) SDL_WaitThread(threads[i], nullptr);
-
-        for (size_t i = 0; i < o::COUNT; ++i)
-            textures[i].createTexture(renderer);
-        
-        /*
-        for (size_t i = 0; i < o::COUNT; ++i)
-            textures[i].create(renderer, i, subSamples, bounds.pathUnitsPerPixel, bounds.xo, bounds.yo);
-            */
+        for (size_t i = 0; i < o::COUNT; ++i) textures[i].createTexture(renderer);
+        textures[o::FRAME].setBlendMode(SDL_BLENDMODE_NONE);
     }
 
     void drawGame(SDL_Renderer* renderer, int pos) {
-        textures[o::FRAME].render(renderer);
+
+        textures[o::FRAME].renderWithInset(renderer, 1);
         textures[o::BODY].render(renderer);
         textures[o::LEFT_ARM].render(renderer);
         textures[o::RIGHT_ARM].render(renderer);
@@ -287,8 +345,7 @@ int main(int argc, char* argv[]) {
             }
             w = rect.w;
             h = rect.h;
-        }
-        else {
+        } else {
             w = 1024;
             h = 768;
         }
@@ -296,9 +353,9 @@ int main(int argc, char* argv[]) {
         w = parameters.width;
         h = parameters.height;
     }
-    //SDL_WINDOWPOS_CENTERED_DISPLAY(parameters.displayIndex),    SDL_WINDOWPOS_CENTERED_DISPLAY(parameters.displayIndex)
-    SDL_Window* window = SDL_CreateWindow("Test", 0, 0, w, h,
-                                          (parameters.fullscreen ? SDL_WINDOW_FULLSCREEN : SDL_WINDOW_BORDERLESS));
+    // SDL_WINDOWPOS_CENTERED_DISPLAY(parameters.displayIndex), SDL_WINDOWPOS_CENTERED_DISPLAY(parameters.displayIndex)
+    SDL_Window* window =
+        SDL_CreateWindow("Test", 0, 0, w, h, (parameters.fullscreen ? SDL_WINDOW_FULLSCREEN : SDL_WINDOW_BORDERLESS));
     if (window == nullptr) {
         std::cerr << "Error creating window:" << SDL_GetError() << std::endl;
         return 1;
@@ -335,7 +392,7 @@ int main(int argc, char* argv[]) {
             if (finished)
                 break;
 
-            SDL_SetRenderDrawColor(renderer, 0x80, 0x80, 0x80, 0xFF);
+            SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0xFF);
             SDL_RenderClear(renderer);
             gameState.drawGame(renderer, pos);
             SDL_RenderPresent(renderer);
