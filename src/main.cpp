@@ -9,28 +9,7 @@
 #include "Outlines.h"
 #include "Path.h"
 
-void addOutlineToPath(Path& path, int id) {
-    auto node = Outlines::ALL_OUTLINES[id];
-
-    while (node->action != 'X') {
-        if (node->action == 'M') {
-            path.moveTo({node->x, node->y});
-            ++node;
-        } else if (node->action == 'L') {
-            path.lineTo({node->x, node->y});
-            ++node;
-        } else if (node->action == 'S' || node->action == 'A') {
-            path.curveTo({node->x, node->y}, {node[1].x, node[1].y}, {node[2].x, node[2].y});
-            node += 3;
-        }
-    }
-}
-
 namespace o = Outlines;
-/*
-uint32_t LCD_ON = 0x00000000;
-uint32_t LCD_OFF = 0x80808000;
-*/
 
 class Bounds {
 private:
@@ -75,7 +54,9 @@ public:
         return (y - yo) / pathUnitsPerPixel;
     }
 
-
+    Point outlineToPixel(const Outlines::Node& node) const {
+        return Point{(node.x - xo) / pathUnitsPerPixel, (node.y - yo) / pathUnitsPerPixel};
+    }
 };
 
 struct ElementParameters {
@@ -84,7 +65,6 @@ struct ElementParameters {
     uint32_t onColour;
     uint32_t offColour;
 };
-
 
 class LcdElementTexture {
 protected:
@@ -105,39 +85,50 @@ public:
             SDL_FreeSurface(surface);
 
         Path p;
-        addOutlineToPath(p, outlineID);
 
-        dest.x = static_cast<int>(std::floor(elementParameters.bounds.pathXToPixel(p.leftBound)));
-        int right = static_cast<int>(std::ceil(elementParameters.bounds.pathXToPixel(p.rightBound)));
-        dest.y = static_cast<int>(std::floor(elementParameters.bounds.pathYToPixel(p.topBound)));
-        int bottom = static_cast<int>(std::ceil(elementParameters.bounds.pathYToPixel(p.bottomBound)));
+        auto node = Outlines::ALL_OUTLINES[outlineID];
+        const Bounds& bounds = elementParameters.bounds;
 
-        dest.w = right - dest.x;
-        dest.h = bottom - dest.y;
+        while (node->action != 'X') {
+            if (node->action == 'M') {
+                p.moveTo(bounds.outlineToPixel(*node));
+                ++node;
+            } else if (node->action == 'L') {
+                p.lineTo(bounds.outlineToPixel(*node));
+                ++node;
+            } else if (node->action == 'A') {
+                p.curveTo(bounds.outlineToPixel(node[0]), bounds.outlineToPixel(node[1]),
+                          bounds.outlineToPixel(node[2]));
+                node += 3;
+            }
+        }
 
-        const double puLeft = elementParameters.bounds.pixelXToPath(dest.x);
-        //double puTop = elementParameters.originY + (dest.y * elementParameters.pathUnitsPerPixel);
+        dest.x = static_cast<int>(std::floor(p.leftBound));
+        dest.w = static_cast<int>(std::ceil(p.rightBound)) - dest.x;
+        dest.y = static_cast<int>(std::floor(p.topBound));
+        dest.h = static_cast<int>(std::ceil(p.bottomBound)) - dest.y;
 
         surface = SDL_CreateRGBSurfaceWithFormat(0, dest.w, dest.h, 32, SDL_PIXELFORMAT_RGBA32);
         SDL_LockSurface(surface);
         auto row = std::make_unique<uint8_t[]>(dest.w);
         const uint32_t sub2 = elementParameters.subSamples * elementParameters.subSamples;
-        for (int y = 0; y < dest.h; ++y) {
-            memset(row.get(), 0x00, dest.w);
-            for (int subY = 0; subY < elementParameters.subSamples; ++subY) {
-                double pathY = elementParameters.bounds.pixelYToPath(y + dest.y + static_cast<double>(subY) / elementParameters.subSamples);
-                p.scanLine(pathY, puLeft, elementParameters.bounds.pathUnitsPerPixel, dest.w, elementParameters.subSamples, row.get());
+        for (size_t y = 0; y < dest.h; ++y) {
+            memset(row.get(), 0, dest.w);
+            for (size_t subY = 0; subY < elementParameters.subSamples; ++subY) {
+                double pathY = dest.y + y + static_cast<double>(subY) / elementParameters.subSamples;
+                p.scanLine(pathY, dest.x, 1, dest.w, elementParameters.subSamples, row.get());
             }
             int* line = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(surface->pixels) + (y * surface->pitch));
             for (int x = 0; x < dest.w; ++x) {
                 uint32_t blend1 = (0x100 * row[x]) / sub2;
                 uint32_t blend2 = 0x100 - blend1;
-
-
-                uint32_t cbr = ((elementParameters.onColour & 0xFF00FF) * blend1 + (elementParameters.offColour & 0xFF00FF) * blend2) >> 8;
-                uint32_t cg = ((elementParameters.onColour & 0xFF00) * blend1 + (elementParameters.offColour & 0xFF00) * blend2) >> 8;
+                uint32_t cbr = ((elementParameters.onColour & 0xFF00FF) * blend1 +
+                                (elementParameters.offColour & 0xFF00FF) * blend2) >>
+                               8;
+                uint32_t cg = ((elementParameters.onColour & 0xFF00) * blend1 +
+                               (elementParameters.offColour & 0xFF00) * blend2) >>
+                              8;
                 uint32_t value = (cbr & 0xFF00FF) | (cg & 0xFF00);
-
 
                 if (row[x] == 0)
                     line[x] = value;
@@ -146,7 +137,6 @@ public:
             }
         }
         SDL_UnlockSurface(surface);
-
     }
 
     void createTexture(SDL_Renderer* renderer) {
@@ -181,10 +171,7 @@ public:
         d.h = s.h;
         SDL_RenderCopy(renderer, texture, &s, &d);
     }
-
 };
-
-
 
 class GameState {
 private:
@@ -218,7 +205,7 @@ public:
         worker.game = this;
         worker.elementParameters.bounds.computeBounds(screenW, screenH);
         worker.elementParameters.offColour = 0x808080;
-        worker.elementParameters.onColour = 0x101080;
+        worker.elementParameters.onColour = 0x101010;
 
         worker.elementParameters.subSamples = subSamples;
         worker.renderer = renderer;
@@ -233,7 +220,6 @@ public:
     }
 
     void drawGame(SDL_Renderer* renderer, int pos) {
-
         textures[o::FRAME].renderWithInset(renderer, 1);
         textures[o::BODY].render(renderer);
         textures[o::LEFT_ARM].render(renderer);
