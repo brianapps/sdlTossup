@@ -66,6 +66,60 @@ struct ElementParameters {
     uint32_t offColour;
 };
 
+class Transform {
+    double screenLeftInOutlinePoints;
+    double screenTopInOutlinePoints;
+
+    double pixelsPerOutlinePoint;
+
+public:
+    void calculateToFit(size_t outlineID, int screenWidth, int screenHeight) {
+        int xMin, xMax, yMin, yMax;
+        xMin = yMin = std::numeric_limits<int>::max();
+        xMax = yMax = std::numeric_limits<int>::min();
+
+        for (auto node = o::ALL_OUTLINES[o::FRAME]; node->action != 'X'; ++node) {
+            xMin = std::min(xMin, node->x);
+            xMax = std::max(xMax, node->x);
+            yMin = std::min(xMin, node->y);
+            yMax = std::max(yMax, node->y);
+        }
+
+        // Pick the scale that exactly fits to either the width or height but doesn't exceed the other.
+        double sx = screenWidth / (static_cast<double>(xMax) - xMin);
+        double sy = screenHeight / (static_cast<double>(yMax) - yMin);
+        pixelsPerOutlinePoint = std::min(sx, sy);
+
+        screenLeftInOutlinePoints = (static_cast<double>(xMin) + xMax - screenWidth / pixelsPerOutlinePoint) / 2.0;
+        screenTopInOutlinePoints = (static_cast<double>(yMin) + yMax - screenHeight /pixelsPerOutlinePoint) / 2.0;
+    }
+
+    Point outlineToScreen(const Outlines::Node& outlineNode) {
+        return Point{(outlineNode.x - screenLeftInOutlinePoints) * pixelsPerOutlinePoint,
+                     (outlineNode.y - screenTopInOutlinePoints) * pixelsPerOutlinePoint};
+    }
+
+    Path outlineToPath(size_t outlineID) {
+        Path path;
+
+        auto node = Outlines::ALL_OUTLINES[outlineID];
+
+        while (node->action != 'X') {
+            if (node->action == 'M') {
+                path.moveTo(outlineToScreen(*node));
+                ++node;
+            } else if (node->action == 'L') {
+                path.lineTo(outlineToScreen(*node));
+                ++node;
+            } else if (node->action == 'A') {
+                path.curveTo(outlineToScreen(node[0]), outlineToScreen(node[1]), outlineToScreen(node[2]));
+                node += 3;
+            }
+        }
+        return path;
+    }
+};
+
 class LcdElementTexture {
 protected:
     SDL_Texture* texture = nullptr;
@@ -177,6 +231,9 @@ class GameState {
 private:
     LcdElementTexture textures[o::COUNT];
 
+    uint32_t offColour = 0xFFFFFF;
+    uint32_t onColour = 0x000000;
+
     Bounds bounds;
 
     struct Worker {
@@ -199,13 +256,32 @@ private:
         }
     };
 
+protected:
+    // see https://en.wikipedia.org/wiki/Seven-segment_display
+    static const uint8_t digitToSegments[];
+
+    void renderDigit(SDL_Renderer* renderer, size_t outlineID, size_t digit) {
+        uint8_t mask = digitToSegments[digit];
+        while (mask != 0) {
+            if ((mask & 1) != 0)
+                textures[outlineID].render(renderer);
+            mask >>= 1;
+            outlineID++;
+        }
+    }
+
 public:
+    void setGameColours(uint32_t onColour, uint32_t offColour) {
+        this->onColour = onColour;
+        this->offColour = offColour;
+    }
+
     void createTextures(SDL_Renderer* renderer, int screenW, int screenH, int subSamples) {
         Worker worker;
         worker.game = this;
         worker.elementParameters.bounds.computeBounds(screenW, screenH);
-        worker.elementParameters.offColour = 0x808080;
-        worker.elementParameters.onColour = 0x101010;
+        worker.elementParameters.onColour = onColour;
+        worker.elementParameters.offColour = offColour;
 
         worker.elementParameters.subSamples = subSamples;
         worker.renderer = renderer;
@@ -219,7 +295,11 @@ public:
         textures[o::FRAME].setBlendMode(SDL_BLENDMODE_NONE);
     }
 
-    void drawGame(SDL_Renderer* renderer, int pos) {
+    void render(SDL_Renderer* renderer, int pos) {
+        SDL_SetRenderDrawColor(renderer, onColour & 0xFF, (onColour >> 8) & 0xFF, (onColour >> 16) & 0xFF,
+                               SDL_ALPHA_OPAQUE);
+        SDL_RenderClear(renderer);
+
         textures[o::FRAME].renderWithInset(renderer, 1);
         textures[o::BODY].render(renderer);
         textures[o::LEFT_ARM].render(renderer);
@@ -230,11 +310,20 @@ public:
         if (armPos == 3)
             armPos = 1;
 
-        int ballPos = (pos / 50) % 22;
+        int ballPos = (pos / 60) % 22;
         if (ballPos >= 12)
             ballPos = 22 - ballPos;
-
         textures[o::OUTER0 + ballPos].render(renderer);
+
+        ballPos = (9 + (20 + pos) / 60) % 18;
+        if (ballPos >= 10)
+            ballPos = 18 - ballPos;
+        textures[o::MID0 + ballPos].render(renderer);
+
+        ballPos = ((40 + pos) / 60) % 14;
+        if (ballPos >= 8)
+            ballPos = 14 - ballPos;
+        textures[o::INNER0 + ballPos].render(renderer);
 
         switch (armPos) {
             case 0:
@@ -256,8 +345,17 @@ public:
                 textures[o::RIGHT_ARM_OUTER].render(renderer);
                 break;
         }
+
+        renderDigit(renderer, o::UNIT_A, pos % 10);
+        renderDigit(renderer, o::TENS_A, (pos / 10) % 10);
+        renderDigit(renderer, o::HUND_A, (pos / 100) % 10);
+        renderDigit(renderer, o::THOU_A, (pos / 1000) % 10);
+
+        SDL_RenderPresent(renderer);
     }
 };
+
+const uint8_t GameState::digitToSegments[] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
 
 class CommandLineParameters {
 public:
@@ -378,10 +476,7 @@ int main(int argc, char* argv[]) {
             if (finished)
                 break;
 
-            SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0xFF);
-            SDL_RenderClear(renderer);
-            gameState.drawGame(renderer, pos);
-            SDL_RenderPresent(renderer);
+            gameState.render(renderer, pos);
         }
     }
 
