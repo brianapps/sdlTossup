@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <ctime>
 
 #include "Outlines.h"
 #include "Path.h"
@@ -231,8 +232,8 @@ class GameState {
 private:
     LcdElementTexture textures[o::COUNT];
 
-    uint32_t offColour = 0xFFFFFF;
-    uint32_t onColour = 0x000000;
+    uint32_t offColour = 0x708080;
+    uint32_t onColour = 0x424242;
 
     Bounds bounds;
 
@@ -261,7 +262,7 @@ protected:
     static const uint8_t digitToSegments[];
 
     void renderDigit(SDL_Renderer* renderer, size_t outlineID, size_t digit) {
-        uint8_t mask = digitToSegments[digit];
+        uint8_t mask = digitToSegments[digit % 10];
         while (mask != 0) {
             if ((mask & 1) != 0)
                 textures[outlineID].render(renderer);
@@ -293,6 +294,58 @@ public:
         for (size_t i = 0; i < NUM_THREADS; ++i) SDL_WaitThread(threads[i], nullptr);
         for (size_t i = 0; i < o::COUNT; ++i) textures[i].createTexture(renderer);
         textures[o::FRAME].setBlendMode(SDL_BLENDMODE_NONE);
+    }
+
+    
+
+    void renderTimeMode(SDL_Renderer* renderer) {
+        Uint32 currentTicks = SDL_GetTicks();
+        Uint32 gamePos = ((currentTicks / 1000) % 22);
+
+        SDL_SetRenderDrawColor(renderer, onColour & 0xFF, (onColour >> 8) & 0xFF, (onColour >> 16) & 0xFF,
+            SDL_ALPHA_OPAQUE);
+        SDL_RenderClear(renderer);
+
+        textures[o::FRAME].renderWithInset(renderer, 1);
+        textures[o::BODY].render(renderer);
+        textures[o::LEFT_ARM].render(renderer);
+        textures[o::RIGHT_ARM].render(renderer);
+
+        if (gamePos < 2 || gamePos > 19) {
+            textures[o::LEFT_LEG_UP].render(renderer);
+            textures[o::RIGHT_LEG_DOWN].render(renderer);
+            textures[o::LEFT_ARM_INNER].render(renderer);
+            textures[o::RIGHT_ARM_OUTER].render(renderer);
+        }
+        else if (gamePos >= 9 && gamePos <= 12) {
+            textures[o::LEFT_LEG_DOWN].render(renderer);
+            textures[o::RIGHT_LEG_UP].render(renderer);
+            textures[o::LEFT_ARM_OUTER].render(renderer);
+            textures[o::RIGHT_ARM_INNER].render(renderer);
+        }
+        else {
+            textures[o::LEFT_LEG_DOWN].render(renderer);
+            textures[o::RIGHT_LEG_DOWN].render(renderer);
+            textures[o::LEFT_ARM_MID].render(renderer);
+            textures[o::RIGHT_ARM_MID].render(renderer);
+        }
+
+        int ballPos = gamePos;
+        if (ballPos >= 12)
+            ballPos = 22 - ballPos;
+        textures[o::OUTER0 + ballPos].render(renderer);
+
+        std::time_t currentTime;
+        std::time(&currentTime);
+        auto localTime = std::localtime(&currentTime);
+        renderDigit(renderer, o::UNIT_A, localTime->tm_min);
+        renderDigit(renderer, o::TENS_A, localTime->tm_min / 10);
+        int hour = localTime->tm_hour % 12;
+        renderDigit(renderer, o::HUND_A, hour);
+        if (hour >= 10)
+            renderDigit(renderer, o::THOU_A, hour / 10);
+
+        SDL_RenderPresent(renderer);
     }
 
     void render(SDL_Renderer* renderer, int pos) {
@@ -364,6 +417,8 @@ public:
     int width = -1;
     int height = -1;
     int displayIndex = 0;
+    uint32_t offColour = 0x708080;
+    uint32_t onColour = 0x424242;
 
     bool parse(int argc, char* argv[]) {
         int i = 1;
@@ -386,6 +441,19 @@ public:
                     displayIndex = std::strtol(argv[i], &end, 10);
                     ok = *end == '\0';
                 }
+            }
+            else if (std::strcmp(argv[i], "-lcd") == 0 || std::strcmp(argv[i], "-back") == 0) {
+                bool isOn = std::strcmp(argv[i], "-lcd") == 0;
+                ok = ++i < argc;
+                if (ok) {
+                    char* end;
+                    auto colour = std::strtol(argv[i], &end, 16);
+                    if (isOn)
+                        onColour = colour;
+                    else
+                        offColour = colour;
+                    ok = *end == '\0';
+                }
             } else {
                 char* end;
                 int number = std::strtol(argv[i], &end, 10);
@@ -397,7 +465,7 @@ public:
                         height = number;
                     ++dimension;
                 }
-            }
+            } 
 
             ++i;
         }
@@ -407,6 +475,19 @@ public:
 
         return ok && ((width == -1 && height == -1) || (width != -1 && height != -1));
     }
+
+    void showUsage() {
+        std::cout << "sdlTossup [-f] [-d <display_index>] [-s <subsamples>] [-lcd <hexcolour>] [-back <hexcolour>] [<width> <height>]" << std::endl;
+        std::cout << std::endl;
+        std::cout << "-f        run game in fullscreen mode." << std::endl;
+        std::cout << "-d        display game on the monitor given by <display_index>." << std::endl;
+        std::cout << "-s        size <subsamples> by <subsamples> grid used for anti-aliasing. Can be 1 to 15." << std::endl;
+        std::cout << "-lcd      the colour in as an BBGGRR hex string for the LCD elements. Defaults to 424242." << std::endl;
+        std::cout << "-back     the colour in as an BBGGRR hex string for the screen background. Defaults to 708080." << std::endl;
+        std::cout << "<width>   width of the game texture." << std::endl;
+        std::cout << "<height>  height of the game texture." << std::endl;
+    }
+
 };
 
 int main(int argc, char* argv[]) {
@@ -416,6 +497,7 @@ int main(int argc, char* argv[]) {
 
     if (!parameters.parse(argc, argv)) {
         std::cerr << "Error parsing command line arguments." << std::endl;
+        parameters.showUsage();
         return 1;
     }
 
@@ -457,6 +539,7 @@ int main(int argc, char* argv[]) {
         SDL_Event event;
 
         GameState gameState;
+        gameState.setGameColours(parameters.onColour, parameters.offColour);
         auto s = std::chrono::high_resolution_clock::now();
         gameState.createTextures(renderer, w, h, parameters.subsamples);
         auto e = std::chrono::high_resolution_clock::now();
@@ -476,7 +559,7 @@ int main(int argc, char* argv[]) {
             if (finished)
                 break;
 
-            gameState.render(renderer, pos);
+            gameState.renderTimeMode(renderer);
         }
     }
 
