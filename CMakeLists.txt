@@ -20,3 +20,10 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # silence GCC or raspberry pi about using std::sort and the abi having changed
     target_compile_options(SDLTossup PRIVATE -Wno-psabi)
 endif()
+
+
+add_custom_command(
+        TARGET SDLTossup POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/resources
+                ${CMAKE_CURRENT_BINARY_DIR})

@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <memory>
-#include <ctime>
 
 #include "Outlines.h"
 #include "Path.h"
@@ -92,7 +92,7 @@ public:
         pixelsPerOutlinePoint = std::min(sx, sy);
 
         screenLeftInOutlinePoints = (static_cast<double>(xMin) + xMax - screenWidth / pixelsPerOutlinePoint) / 2.0;
-        screenTopInOutlinePoints = (static_cast<double>(yMin) + yMax - screenHeight /pixelsPerOutlinePoint) / 2.0;
+        screenTopInOutlinePoints = (static_cast<double>(yMin) + yMax - screenHeight / pixelsPerOutlinePoint) / 2.0;
     }
 
     Point outlineToScreen(const Outlines::Node& outlineNode) {
@@ -296,14 +296,12 @@ public:
         textures[o::FRAME].setBlendMode(SDL_BLENDMODE_NONE);
     }
 
-    
-
     void renderTimeMode(SDL_Renderer* renderer) {
         Uint32 currentTicks = SDL_GetTicks();
         Uint32 gamePos = ((currentTicks / 1000) % 22);
 
         SDL_SetRenderDrawColor(renderer, onColour & 0xFF, (onColour >> 8) & 0xFF, (onColour >> 16) & 0xFF,
-            SDL_ALPHA_OPAQUE);
+                               SDL_ALPHA_OPAQUE);
         SDL_RenderClear(renderer);
 
         textures[o::FRAME].renderWithInset(renderer, 1);
@@ -316,14 +314,12 @@ public:
             textures[o::RIGHT_LEG_DOWN].render(renderer);
             textures[o::LEFT_ARM_INNER].render(renderer);
             textures[o::RIGHT_ARM_OUTER].render(renderer);
-        }
-        else if (gamePos >= 9 && gamePos <= 12) {
+        } else if (gamePos >= 9 && gamePos <= 12) {
             textures[o::LEFT_LEG_DOWN].render(renderer);
             textures[o::RIGHT_LEG_UP].render(renderer);
             textures[o::LEFT_ARM_OUTER].render(renderer);
             textures[o::RIGHT_ARM_INNER].render(renderer);
-        }
-        else {
+        } else {
             textures[o::LEFT_LEG_DOWN].render(renderer);
             textures[o::RIGHT_LEG_DOWN].render(renderer);
             textures[o::LEFT_ARM_MID].render(renderer);
@@ -419,6 +415,7 @@ public:
     int displayIndex = 0;
     uint32_t offColour = 0x708080;
     uint32_t onColour = 0x424242;
+    bool showInfo = false;
 
     bool parse(int argc, char* argv[]) {
         int i = 1;
@@ -441,8 +438,7 @@ public:
                     displayIndex = std::strtol(argv[i], &end, 10);
                     ok = *end == '\0';
                 }
-            }
-            else if (std::strcmp(argv[i], "-lcd") == 0 || std::strcmp(argv[i], "-back") == 0) {
+            } else if (std::strcmp(argv[i], "-lcd") == 0 || std::strcmp(argv[i], "-back") == 0) {
                 bool isOn = std::strcmp(argv[i], "-lcd") == 0;
                 ok = ++i < argc;
                 if (ok) {
@@ -454,6 +450,8 @@ public:
                         offColour = colour;
                     ok = *end == '\0';
                 }
+            } else if (std::strcmp(argv[i], "-info") == 0) {
+                showInfo = true;
             } else {
                 char* end;
                 int number = std::strtol(argv[i], &end, 10);
@@ -465,7 +463,7 @@ public:
                         height = number;
                     ++dimension;
                 }
-            } 
+            }
 
             ++i;
         }
@@ -477,18 +475,57 @@ public:
     }
 
     void showUsage() {
-        std::cout << "sdlTossup [-f] [-d <display_index>] [-s <subsamples>] [-lcd <hexcolour>] [-back <hexcolour>] [<width> <height>]" << std::endl;
+        std::cout << "sdlTossup [-f] [-d <display_index>] [-s <subsamples>] [-lcd <hexcolour>] [-back <hexcolour>] "
+                     "[<width> <height>]"
+                  << std::endl;
         std::cout << std::endl;
         std::cout << "-f        run game in fullscreen mode." << std::endl;
         std::cout << "-d        display game on the monitor given by <display_index>." << std::endl;
-        std::cout << "-s        size <subsamples> by <subsamples> grid used for anti-aliasing. Can be 1 to 15." << std::endl;
-        std::cout << "-lcd      the colour in as an BBGGRR hex string for the LCD elements. Defaults to 424242." << std::endl;
-        std::cout << "-back     the colour in as an BBGGRR hex string for the screen background. Defaults to 708080." << std::endl;
+        std::cout << "-s        size <subsamples> by <subsamples> grid used for anti-aliasing. Can be 1 to 15."
+                  << std::endl;
+        std::cout << "-lcd      the colour in as an BBGGRR hex string for the LCD elements. Defaults to 424242."
+                  << std::endl;
+        std::cout << "-back     the colour in as an BBGGRR hex string for the screen background. Defaults to 708080."
+                  << std::endl;
+        std::cout << "-info     Show display and audio info and then exit." << std::endl;
         std::cout << "<width>   width of the game texture." << std::endl;
         std::cout << "<height>  height of the game texture." << std::endl;
     }
-
 };
+
+void showInfo() {
+    const int displays = SDL_GetNumVideoDisplays();
+    std::cout << "Number of displays = " << displays << std::endl;
+    for (int display = 0; display < displays; ++display) {
+        SDL_Rect displayRect;
+        SDL_GetDisplayBounds(display, &displayRect);
+        std::cout << "  " << display << ": " << SDL_GetDisplayName(display) << " w = " << displayRect.w << "; h = " << displayRect.h << std::endl;
+    }
+
+    const int audioDevices = SDL_GetNumAudioDevices(0);
+    std::cout << "Number of audio devices = " << audioDevices << std::endl;
+    for (int device = 0; device < audioDevices; ++device) {
+        std::cout << "  " << device << ": " << SDL_GetAudioDeviceName(device, 0) << std::endl;
+    }
+
+}
+
+Uint8* buffer[3];
+SDL_AudioSpec spec;
+Uint32 length;
+SDL_AudioDeviceID id;
+int bi = 0;
+
+Uint32 playBeep(Uint32 interval, void* param) {
+    Uint32 ticks = SDL_GetTicks();
+    SDL_ClearQueuedAudio(id);
+    SDL_QueueAudio(id, buffer[bi % 3], length);
+    bi++;
+    //std::cout << ticks << std::endl;
+    Uint32 next = (ticks + 100) / 100;
+    return 300; // *next - ticks;
+}
+
 
 int main(int argc, char* argv[]) {
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
@@ -499,6 +536,31 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error parsing command line arguments." << std::endl;
         parameters.showUsage();
         return 1;
+    }
+
+
+
+    SDL_LoadWAV("mid.wav", &spec, &buffer[0], &length);
+    SDL_LoadWAV("mid.wav", &spec, &buffer[1], &length);
+    SDL_LoadWAV("mid.wav", &spec, &buffer[2], &length);
+
+    spec.samples = 128;
+
+
+     id =  SDL_OpenAudioDevice(nullptr, 0, &spec, nullptr, 0);
+
+
+    
+    SDL_PauseAudioDevice(id, 0);
+
+    SDL_AddTimer(900, playBeep, nullptr);
+
+    
+   // SDL_QueueAudio(id, buffer, length);
+
+    if (parameters.showInfo) {
+        showInfo();
+        return 0;
     }
 
     int w, h;
@@ -527,7 +589,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    SDL_Renderer* renderer = SDL_CreateRenderer(window, 0, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, 0, SDL_RENDERER_ACCELERATED); // | SDL_RENDERER_PRESENTVSYNC);
     if (renderer == nullptr) {
         std::cerr << "Error creating renderer:" << SDL_GetError() << std::endl;
         return 1;
@@ -548,7 +610,7 @@ int main(int argc, char* argv[]) {
 
         bool finished = false;
 
-        for (int pos = 0; pos < 6000; ++pos) {
+        while (true) {
             while (SDL_PollEvent(&event) != 0) {
                 if (event.type == SDL_KEYDOWN) {
                     finished = finished || event.key.keysym.sym == SDLK_q;
@@ -560,6 +622,7 @@ int main(int argc, char* argv[]) {
                 break;
 
             gameState.renderTimeMode(renderer);
+            SDL_Delay(0);
         }
     }
 
