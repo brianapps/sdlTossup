@@ -499,7 +499,8 @@ void showInfo() {
     for (int display = 0; display < displays; ++display) {
         SDL_Rect displayRect;
         SDL_GetDisplayBounds(display, &displayRect);
-        std::cout << "  " << display << ": " << SDL_GetDisplayName(display) << " w = " << displayRect.w << "; h = " << displayRect.h << std::endl;
+        std::cout << "  " << display << ": " << SDL_GetDisplayName(display) << " w = " << displayRect.w
+                  << "; h = " << displayRect.h << std::endl;
     }
 
     const int audioDevices = SDL_GetNumAudioDevices(0);
@@ -507,25 +508,107 @@ void showInfo() {
     for (int device = 0; device < audioDevices; ++device) {
         std::cout << "  " << device << ": " << SDL_GetAudioDeviceName(device, 0) << std::endl;
     }
-
 }
 
-Uint8* buffer[3];
-SDL_AudioSpec spec;
-Uint32 length;
-SDL_AudioDeviceID id;
-int bi = 0;
+class GameSounds {
+private:
+    struct WavBuffer {
+        Uint8* buffer = nullptr;
+        Uint32 length = 0;
+
+        bool loadWav(const char* fileName);
+
+        void play(SDL_AudioDeviceID id) {
+            SDL_QueueAudio(id, buffer, length);
+        }
+
+        ~WavBuffer() {
+            if (buffer != nullptr)
+                SDL_FreeWAV(buffer);
+        }
+    };
+
+    WavBuffer innerBuffer;
+    WavBuffer midBuffer;
+    WavBuffer outerBuffer;
+    WavBuffer catchBuffer;
+    WavBuffer dropBuffer;
+    SDL_AudioDeviceID audioDeviceID = 0;
+
+public:
+    GameSounds() = default;
+
+    ~GameSounds();
+
+    bool init();
+
+    void playInnerBeep() {
+        innerBuffer.play(audioDeviceID);
+    }
+
+    void playMidBeep() {
+        midBuffer.play(audioDeviceID);
+    }
+
+    void playOuterBeep() {
+        outerBuffer.play(audioDeviceID);
+    }
+
+    void playDropBeep() {
+        dropBuffer.play(audioDeviceID);
+    }
+
+    void playCatchBeep() {
+        catchBuffer.play(audioDeviceID);
+    }
+};
+
+bool GameSounds::WavBuffer::loadWav(const char* fileName) {
+    SDL_AudioSpec loadedSpec;
+    if (SDL_LoadWAV(fileName, &loadedSpec, &buffer, &length) == nullptr) {
+        SDL_Log("Failed to load file %s: %s", fileName, SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+GameSounds::~GameSounds() {
+    if (audioDeviceID != 0)
+        SDL_CloseAudioDevice(audioDeviceID);
+}
+
+bool GameSounds::init() {
+    if (audioDeviceID != 0) {
+        SDL_Log("Error, game sounds are already initialised.");
+        return false;
+    }
+
+    if (!innerBuffer.loadWav("inner.wav") || !midBuffer.loadWav("mid.wav") || !outerBuffer.loadWav("outer.wav") ||
+        !catchBuffer.loadWav("catch.wav") || !dropBuffer.loadWav("drop.wav"))
+        return false;
+
+    SDL_AudioSpec desiredSpec = { 0 };
+    desiredSpec.freq = 44100;
+    desiredSpec.format = AUDIO_S16;
+    desiredSpec.channels = 1;
+    // We keep the buffer size quite small so ensure any game sounds play without too much delay. in this case 64 / 44.1 ms.
+    // By default SDL sets this to 4096 which may result in up a 90ms delay before the sound is played.
+    desiredSpec.samples = 64; 
+
+    audioDeviceID = SDL_OpenAudioDevice(nullptr, 0, &desiredSpec, nullptr, 0);
+    if (audioDeviceID == 0) {
+        SDL_Log("Could not open audio device: %s", SDL_GetError());
+        return false;
+    }
+
+    SDL_PauseAudioDevice(audioDeviceID, 0);
+    return true;
+}
 
 Uint32 playBeep(Uint32 interval, void* param) {
-    Uint32 ticks = SDL_GetTicks();
-    SDL_ClearQueuedAudio(id);
-    SDL_QueueAudio(id, buffer[bi % 3], length);
-    bi++;
-    //std::cout << ticks << std::endl;
-    Uint32 next = (ticks + 100) / 100;
-    return 300; // *next - ticks;
+    reinterpret_cast<GameSounds*>(param)->playCatchBeep();
+    return 300; 
 }
-
 
 int main(int argc, char* argv[]) {
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
@@ -537,26 +620,6 @@ int main(int argc, char* argv[]) {
         parameters.showUsage();
         return 1;
     }
-
-
-
-    SDL_LoadWAV("mid.wav", &spec, &buffer[0], &length);
-    SDL_LoadWAV("mid.wav", &spec, &buffer[1], &length);
-    SDL_LoadWAV("mid.wav", &spec, &buffer[2], &length);
-
-    spec.samples = 128;
-
-
-     id =  SDL_OpenAudioDevice(nullptr, 0, &spec, nullptr, 0);
-
-
-    
-    SDL_PauseAudioDevice(id, 0);
-
-    SDL_AddTimer(900, playBeep, nullptr);
-
-    
-   // SDL_QueueAudio(id, buffer, length);
 
     if (parameters.showInfo) {
         showInfo();
@@ -589,7 +652,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    SDL_Renderer* renderer = SDL_CreateRenderer(window, 0, SDL_RENDERER_ACCELERATED); // | SDL_RENDERER_PRESENTVSYNC);
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, 0, SDL_RENDERER_ACCELERATED);  // | SDL_RENDERER_PRESENTVSYNC);
     if (renderer == nullptr) {
         std::cerr << "Error creating renderer:" << SDL_GetError() << std::endl;
         return 1;
@@ -599,7 +662,8 @@ int main(int argc, char* argv[]) {
 
     {
         SDL_Event event;
-
+        GameSounds sounds;
+        sounds.init();
         GameState gameState;
         gameState.setGameColours(parameters.onColour, parameters.offColour);
         auto s = std::chrono::high_resolution_clock::now();
@@ -607,6 +671,8 @@ int main(int argc, char* argv[]) {
         auto e = std::chrono::high_resolution_clock::now();
         auto delay = std::chrono::duration_cast<std::chrono::milliseconds>(e - s);
         std::cout << "created textures in: " << delay.count() << "ms." << std::endl;
+
+        SDL_TimerID timer = SDL_AddTimer(110, playBeep, &sounds);
 
         bool finished = false;
 
@@ -624,7 +690,11 @@ int main(int argc, char* argv[]) {
             gameState.renderTimeMode(renderer);
             SDL_Delay(0);
         }
+
+        SDL_RemoveTimer(timer);
     }
+
+    
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
