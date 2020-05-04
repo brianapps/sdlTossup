@@ -29,8 +29,8 @@ protected:
     bool crashedLeft = false;
     bool crashedRight = false;
     uint32_t catches;
-    uint32_t gameAHiScore = 139;
-    uint32_t gameBHiScore = 970;
+    uint32_t gameAHiScore = 0;
+    uint32_t gameBHiScore = 0;
     uint32_t timeModeStartedTick = SDL_GetTicks();
     SDL_mutex* mutex;
     SDL_TimerID timerID;

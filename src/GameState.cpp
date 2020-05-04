@@ -194,6 +194,8 @@ bool GameState::moveBall(int& currentPosition, int maxPosition, bool& willDropFl
     }
     return true;
 }
+
+
  
 Uint32 GameState::timerCallback() {
     SDL_LockMutex(mutex);
@@ -229,10 +231,40 @@ Uint32 GameState::timerCallback() {
         catches--;
     }
     gamePosition++;
-    Uint32 nextDelay = crashedLeft || crashedRight ? 0 : gameDelays[0];
-      SDL_UnlockMutex(mutex);
-    return nextDelay;
 
+    Uint32 nextDelay = 0;
+    if (!isShowingCrashed()) {
+        if (currentMode == Mode::GAME_A)
+        {
+            if (score < 5)
+                nextDelay = gameDelays[0];
+            else if (score < 10)
+                nextDelay = gameDelays[1];
+            else if (score < 20)
+                nextDelay = gameDelays[3];
+            else {
+                int hundreds = score / 100;
+                int  tens = (score / 10) % 10;
+                size_t index = std::min(17, 2 + tens + (hundreds >= 4 ? 12 : hundreds * 2));
+                nextDelay = gameDelays[index];
+            }
+        }
+        else {
+            int thousands = score / 1000;
+            int hundreds = (score / 100) % 10;
+            int index = std::min(17, 2 + hundreds + (thousands >= 4 ? 12 : thousands * 2));
+            nextDelay = gameDelays[index];
+        }
+    }
+    else {
+        if (currentMode == Mode::GAME_A)
+            gameAHiScore = std::max(gameAHiScore, score);
+        else
+            gameBHiScore = std::max(gameBHiScore, score);
+    }
+
+    SDL_UnlockMutex(mutex);
+    return nextDelay;
 }
 
 Uint32 GameState::staticTimerCallback(Uint32 interval, void* param) {
