@@ -5,7 +5,7 @@ void Path::moveTo(Point p) {
     // points.push_back(p);
     first = p;
     last = p;
-    if (points.empty()) {
+    if (edges.empty()) {
         leftBound = rightBound = p.x;
         bottomBound = topBound = p.y;
     }
@@ -13,11 +13,9 @@ void Path::moveTo(Point p) {
 
 void Path::lineTo(Point p) {
     if (p.y > last.y) {
-        points.push_back(last);
-        points.push_back(p);
-    } else {
-        points.push_back(p);
-        points.push_back(last);
+        edges.emplace_back(last, p);
+    } else if (p.y != last.y) {
+        edges.emplace_back(p, last);
     }
     leftBound = std::min(leftBound, p.x);
     rightBound = std::max(rightBound, p.x);
@@ -70,12 +68,64 @@ void Path::curveTo(Point b, Point c, Point d) {
     }
 }
 
+void Path::end() {
+    std::sort(edges.begin(), edges.end(), [](const Edge& e1, const Edge& e2) { return e1.start.y < e2.start.y; });
+    nextEdgeIndex = 0;
+    firstActive = nullptr;
+}
+
 void Path::scanLine(double y, double xFirst, double spacing, int length, const int subSamples, uint8_t* results) {
     std::vector<double> intersections;
 
-    for (size_t i = 0; i + 1 < points.size(); i += 2) {
-        const Point& p1 = points[i];
-        const Point& p2 = points[i + 1];
+#if 1
+    // remove edges that we've skipped pass
+    Edge** next = &firstActive;
+    while (*next != nullptr) {
+        if ((*next)->end.y < y) {
+            *next = (*next)->nextActive;
+        }
+        else {
+            next = &(*next)->nextActive;
+        }
+    }
+
+    // then add new candidates
+    while (nextEdgeIndex < edges.size()) {
+        Edge& edge = edges[nextEdgeIndex];
+        if (edge.start.y > y)
+            break;
+        if (y < edge.end.y) {
+            edge.nextActive = firstActive;
+            firstActive = &edge;
+        }
+        nextEdgeIndex++;
+    }
+
+    // compute intersections
+    Edge* e = firstActive;
+    while (e != nullptr) {
+        double intersectionX = e->start.x + (e->end.x - e->start.x) * (y - e->start.y) / (e->end.y - e->start.y);
+        intersections.push_back(intersectionX - xFirst);
+        e = e->nextActive;
+    }
+
+
+    // then fill
+
+    if (intersections.size() > 1) {
+        std::sort(intersections.begin(), intersections.end());
+        for (size_t i = 0; i + 1 < intersections.size(); i += 2) {
+            int firstPixel = std::max(0, static_cast<int>(subSamples * intersections[i] / spacing));
+            int lastPixel = std::min(length * subSamples, static_cast<int>(subSamples * intersections[i + 1] / spacing));
+            for (int pixel = firstPixel; pixel < lastPixel; ++pixel) results[pixel / subSamples]++;
+        }
+    }
+#else
+    for (const Edge& edge : edges) {
+        const Point& p1 = edge.start;
+        const Point& p2 = edge.end;
+        if (p1.y > y)
+            break;
         if (y >= p1.y && y < p2.y) {
             double intersectionX = p1.x + (p2.x - p1.x) * (y - p1.y) / (p2.y - p1.y);
             intersections.push_back(intersectionX - xFirst);
@@ -89,4 +139,5 @@ void Path::scanLine(double y, double xFirst, double spacing, int length, const i
             for (int pixel = firstPixel; pixel < lastPixel; ++pixel) results[pixel / subSamples]++;
         }
     }
+#endif
 }

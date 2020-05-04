@@ -5,10 +5,23 @@
 #include "Point.h"
 
 class Path {
-public:
-    std::vector<Point> points;
+protected:
+
+    struct Edge {
+        Point start;
+        Point end;
+        Edge* nextActive = nullptr;
+        Edge() = default;
+        Edge(const Point& start, const Point& end) : start(start), end(end) {}
+    };
+
+    Edge* firstActive = nullptr;
+    size_t nextEdgeIndex;
+
+    std::vector<Edge> edges;
     Point first;
     Point last;
+public:
 
     double leftBound;
     double topBound;
@@ -24,6 +37,8 @@ public:
     void curveTo(Point b, Point c, Point d, int div);
 
     void curveTo(Point b, Point c, Point d);
+
+    void end();
 
     void close() {
         lineTo(first);
