@@ -53,6 +53,8 @@ void LcdElementTexture::createSurface(int outlineID, const ElementParameters& el
         }
     }
 
+    p.end();
+
     dest.x = static_cast<int>(std::floor(p.leftBound));
     dest.w = static_cast<int>(std::ceil(p.rightBound)) - dest.x;
     dest.y = static_cast<int>(std::floor(p.topBound));

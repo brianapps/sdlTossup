@@ -1,6 +1,7 @@
 #ifndef GAMESTATE_H_
 #define GAMESTATE_H_
 #include "LcdElement.h"
+#include "GameSounds.h"
 
 class GameState {
 protected:
@@ -17,21 +18,28 @@ protected:
     // armPos == 0 - right arm in inner track, left arm in outer track, .
     // armPos == 1 - both arms in the mid track.
     // armPos == 2 - right arm in outer track, left arm in inner track, .
-
-    uint32_t armPosition = 0;
     uint32_t gamePosition = 0;
+    int outerBallPos = -1;
+    int midBallPos = -1;
+    int innerBallPos = -1;
+    uint32_t armPosition = 0;
+    bool willDropOuter;
+    bool willDropMid;
+    bool willDropInner;
     bool crashedLeft = false;
     bool crashedRight = false;
+    uint32_t catches;
     uint32_t gameAHiScore = 139;
     uint32_t gameBHiScore = 970;
     uint32_t timeModeStartedTick = SDL_GetTicks();
+    SDL_mutex* mutex;
+    SDL_TimerID timerID;
 
     LcdElementTexture textures[Outlines::COUNT];
+    GameSounds gameSounds;
 
     uint32_t offColour = 0x708080;
     uint32_t onColour = 0x424242;
-
-    Bounds bounds;
 
     struct Worker {
         GameState* game;
@@ -69,6 +77,11 @@ protected:
     void startTimeMode();
     void moveArmsLeft();
     void moveArmsRight();
+    void setArmPosition(uint32_t armPosition);
+    void resetGameState();
+    Uint32 timerCallback();
+    static Uint32 staticTimerCallback(Uint32 interval, void* param);
+    bool moveBall(int& currentPosition, int maxPosition, bool& willDropFlag, int catchRightPosition);
 
     bool isRunningGame() {
         return !crashedLeft && !crashedRight && (currentMode == Mode::GAME_A || currentMode == Mode::GAME_B);
@@ -80,6 +93,10 @@ protected:
 
 
 public:
+
+    GameState();
+    ~GameState();
+
     void setGameColours(uint32_t onColour, uint32_t offColour) {
         this->onColour = onColour;
         this->offColour = offColour;

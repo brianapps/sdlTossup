@@ -4,13 +4,33 @@
 
 #include "GameState.h"
 #include "LcdElement.h"
+#include "GameSounds.h"
 
 namespace {
     // see https://en.wikipedia.org/wiki/Seven-segment_display
     const uint8_t digitToSegments[] = { 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F };
+
+    const uint32_t gameDelays[] = {
+        393, 336, 254, 243, 231, 226, 214, 203, 192, 180, 169, 157, 146, 134,
+            124, 112, 100, 89
+    };
 }
 
+GameState::GameState() {
+    willDropInner = false;
+    willDropMid = false;
+    willDropOuter = false;
+    mutex = SDL_CreateMutex();
+    timerID = 0;
+    gameSounds.init();
 
+}
+
+GameState::~GameState() {
+    SDL_DestroyMutex(mutex);
+    if (timerID != 0)
+        SDL_RemoveTimer(timerID);
+}
 
 void GameState::renderDigit(SDL_Renderer* renderer, size_t outlineID, size_t digit) {
     uint8_t mask = digitToSegments[digit % 10];
@@ -116,65 +136,160 @@ void GameState::renderTime(SDL_Renderer* renderer) {
     std::time_t currentTime;
     std::time(&currentTime);
     auto localTime = std::localtime(&currentTime);
-    renderScore(renderer, (localTime->tm_hour % 12) * 100 + localTime->tm_min);
-    SDL_RenderPresent(renderer);
+    int hour = (localTime->tm_hour % 12);
+    if (hour == 0)
+        hour = 12;
+    renderScore(renderer, hour * 100 + localTime->tm_min);
 }
 
 
 void GameState::renderGameA(SDL_Renderer* renderer) {
     renderFrameAndJuggler(renderer);
+    if (outerBallPos >= 0 && outerBallPos < 12)
+        textures[Outlines::OUTER0 + outerBallPos].render(renderer);
+    else if (outerBallPos >= 12 && outerBallPos < 22)
+        textures[Outlines::OUTER0 + 22 - outerBallPos].render(renderer);
+
+    if (midBallPos >= 0 && midBallPos < 10)
+        textures[Outlines::MID0 + midBallPos].render(renderer);
+    else if (midBallPos >= 10 && midBallPos < 18)
+        textures[Outlines::MID0 + 18 - midBallPos].render(renderer);
+
+    if (innerBallPos >= 0 && innerBallPos < 8)
+        textures[Outlines::INNER0 + innerBallPos].render(renderer);
+    else if (innerBallPos >= 8  && innerBallPos < 14)
+        textures[Outlines::INNER0 + 14 - innerBallPos].render(renderer);
+
     renderScore(renderer, score);
-    SDL_RenderPresent(renderer);
 }
 
 
 void GameState::renderGameB(SDL_Renderer* renderer) {
-    renderFrameAndJuggler(renderer);
-    renderScore(renderer, score);
-    SDL_RenderPresent(renderer);
+    renderGameA(renderer);
 }
 
+
+bool GameState::moveBall(int& currentPosition, int maxPosition, bool& willDropFlag, int catchRightPosition) {
+    currentPosition = (currentPosition + 1) % maxPosition;
+    if (currentPosition == maxPosition / 2) {
+        willDropFlag = armPosition != (2 - catchRightPosition);
+        if (!willDropFlag)
+            catches++;
+    }
+    else if (currentPosition == 0) {
+        willDropFlag = armPosition != catchRightPosition;
+        if (!willDropFlag)
+            catches++;
+    }
+    else if (gamePosition > 3)
+    {
+        if (currentPosition == 1 || currentPosition == (maxPosition / 2) + 1) {
+            if (willDropFlag) {
+                crashedRight = currentPosition == 1;
+                crashedLeft = currentPosition != 1;
+                currentPosition = -1;
+                return false;
+            }
+        }
+    }
+    return true;
+}
+ 
+Uint32 GameState::timerCallback() {
+    SDL_LockMutex(mutex);
+    int ballIndex;
+    if (currentMode == Mode::GAME_A)
+        ballIndex = 1 + gamePosition % 2;
+    else
+        ballIndex = gamePosition % 3;
+
+    bool playCatch = catches > 0;
+
+    switch (ballIndex) {
+        case 0:
+            if (moveBall(innerBallPos, 14, willDropInner, 0))
+                gameSounds.playInnerBeep();
+            break;
+        case 1:
+            if (moveBall(midBallPos, 18, willDropMid, 1))
+                gameSounds.playMidBeep();
+            break;
+        case 2:
+            if (moveBall(outerBallPos, 22, willDropOuter, 2))
+                gameSounds.playOuterBeep();
+            break;
+    }
+
+    if (isShowingCrashed())
+        gameSounds.playDropBeep();
+    else if (playCatch) {
+        score += currentMode == Mode::GAME_A ? 1 : 10;
+        score %= 10000;
+        gameSounds.playCatchBeep();
+        catches--;
+    }
+    gamePosition++;
+    Uint32 nextDelay = crashedLeft || crashedRight ? 0 : gameDelays[0];
+      SDL_UnlockMutex(mutex);
+    return nextDelay;
+
+}
+
+Uint32 GameState::staticTimerCallback(Uint32 interval, void* param) {
+    return reinterpret_cast<GameState*>(param)->timerCallback();
+}
+
+
+void GameState::resetGameState() {
+    score = 0;
+    catches = 0;
+    outerBallPos = 11;
+    midBallPos = 0;
+    innerBallPos = 7;
+    gamePosition = 0;
+    crashedLeft = false;
+    crashedRight = false;
+}
 
 
 void GameState::startGameA() {
     if (!isRunningGame()) {
+        resetGameState();
         currentMode = Mode::GAME_A;
-        score = 0;
-        crashedLeft = false;
-        crashedRight = false;
+        innerBallPos = -1;
+        timerID = SDL_AddTimer(1, staticTimerCallback, this);
+
     }
 }
 
 void GameState::startGameAHiScore() {
     if (!isRunningGame()) {
+        resetGameState();
         currentMode = Mode::GAME_A_HI_SCORE;
+        innerBallPos = -1;
         score = gameAHiScore;
-        crashedLeft = false;
-        crashedRight = false;
     }
 }
 
 void GameState::startGameB() {
     if (!isRunningGame()) {
+        resetGameState();
         currentMode = Mode::GAME_B;
-        score = 0;
-        crashedLeft = false;
-        crashedRight = false;
+        timerID = SDL_AddTimer(1, staticTimerCallback, this);
     }
 }
 
 void GameState::startGameBHiScore() {
     if (!isRunningGame()) {
+        resetGameState();
         currentMode = Mode::GAME_B_HI_SCORE;
         score = gameBHiScore;
-        crashedLeft = false;
-        crashedRight = false;
     }
-
 }
 
 void GameState::startTimeMode() {
     if (isShowingCrashed()) {
+        gamePosition = 0;
         crashedLeft = false;
         crashedRight = false;
         timeModeStartedTick = SDL_GetTicks();
@@ -182,20 +297,39 @@ void GameState::startTimeMode() {
     }
 }
 
+void GameState::setArmPosition(uint32_t newArmPosition) {
+    if (newArmPosition != armPosition && newArmPosition >= 0 && newArmPosition <= 2) {
+        armPosition = newArmPosition;
+        if (willDropMid && armPosition == 1) {
+            willDropMid = false;
+            catches++;
+        }
+        if (willDropOuter && ((armPosition == 2 && outerBallPos == 0) || (armPosition == 0 && outerBallPos == 11))) {
+            willDropOuter = false;
+            catches++;
+        }
+        if (willDropInner && ((armPosition == 0 && innerBallPos == 0) || (armPosition == 2 && innerBallPos == 7))) {
+            willDropInner = false;
+            catches++;
+        }
+    }
+}
+
 void GameState::moveArmsRight() {
-    if (armPosition < 2 && (currentMode == Mode::GAME_A || currentMode == Mode::GAME_B))
-        armPosition++;
+    if (currentMode == Mode::GAME_A || currentMode == Mode::GAME_B)
+        setArmPosition(armPosition + 1);
 }
 
 void GameState::moveArmsLeft() {
-    if (armPosition > 0 && (currentMode == Mode::GAME_A || currentMode == Mode::GAME_B))
-        armPosition--;
+    if (currentMode == Mode::GAME_A || currentMode == Mode::GAME_B)
+        setArmPosition(armPosition - 1);
 }
-
 
 void GameState::run(SDL_Renderer* renderer) {
     while (true) {
+
         SDL_Event event;
+        SDL_LockMutex(mutex);
         while (SDL_PollEvent(&event) != 0) {
             if (event.type == SDL_KEYDOWN) {
                 switch (event.key.keysym.sym) {
@@ -216,13 +350,6 @@ void GameState::run(SDL_Renderer* renderer) {
                 case SDLK_t:
                     startTimeMode();
                     break;
-                case SDLK_w:
-                    crashedLeft = true;
-                    break;
-                case SDLK_o:
-                    crashedRight = true;
-                    break;
-
                 }
             }
             else if (event.type == SDL_KEYUP) {
@@ -253,6 +380,8 @@ void GameState::run(SDL_Renderer* renderer) {
             break;
 
         }
+        SDL_UnlockMutex(mutex);
+        SDL_RenderPresent(renderer);
         SDL_Delay(0);
     }
 }
