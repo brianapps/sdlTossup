@@ -2,6 +2,7 @@
 #define GAMESTATE_H_
 #include "LcdElement.h"
 #include "GameSounds.h"
+#include "RpiGpio.h"
 
 class GameState {
 protected:
@@ -34,9 +35,11 @@ protected:
     uint32_t timeModeStartedTick = SDL_GetTicks();
     SDL_mutex* mutex;
     SDL_TimerID timerID;
+    SDL_TimerID gpioTimerID;
 
     LcdElementTexture textures[Outlines::COUNT];
     GameSounds gameSounds;
+    RpiGpio rpiGpio;
 
     uint32_t offColour = 0x708080;
     uint32_t onColour = 0x424242;
@@ -81,6 +84,7 @@ protected:
     void resetGameState();
     Uint32 timerCallback();
     static Uint32 staticTimerCallback(Uint32 interval, void* param);
+    static Uint32 staticGpioTimerCallback(Uint32 interval, void* param);
     bool moveBall(int& currentPosition, int maxPosition, bool& willDropFlag, int catchRightPosition);
 
     bool isRunningGame() {

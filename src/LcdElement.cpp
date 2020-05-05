@@ -1,6 +1,7 @@
 #include <SDL.h>
 #include <algorithm>
 #include <memory>
+#include <cstring>
 
 #include "Path.h"
 #include "LcdElement.h"

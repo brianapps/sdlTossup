@@ -22,14 +22,15 @@ GameState::GameState() {
     willDropOuter = false;
     mutex = SDL_CreateMutex();
     timerID = 0;
-    gameSounds.init();
-
+    gpioTimerID = 0;
 }
 
 GameState::~GameState() {
-    SDL_DestroyMutex(mutex);
     if (timerID != 0)
         SDL_RemoveTimer(timerID);
+    if (gpioTimerID != 0)
+        SDL_RemoveTimer(gpioTimerID);
+    SDL_DestroyMutex(mutex);
 }
 
 void GameState::renderDigit(SDL_Renderer* renderer, size_t outlineID, size_t digit) {
@@ -59,6 +60,12 @@ void GameState::renderDigit(SDL_Renderer* renderer, size_t outlineID, size_t dig
     for (size_t i = 0; i < numberOfThreads; ++i) SDL_WaitThread(threads[i], nullptr);
     for (size_t i = 0; i < Outlines::COUNT; ++i) textures[i].createTexture(renderer);
     textures[Outlines::FRAME].setBlendMode(SDL_BLENDMODE_NONE);
+    gameSounds.init();
+
+#ifdef HAS_WIRING_PI
+    rpiGpio.init();
+    gpioTimerID = SDL_AddTimer(1, staticGpioTimerCallback, this);
+#endif
 }
 
 void GameState::renderFrameAndJuggler(SDL_Renderer* renderer) {
@@ -271,6 +278,10 @@ Uint32 GameState::staticTimerCallback(Uint32 interval, void* param) {
     return reinterpret_cast<GameState*>(param)->timerCallback();
 }
 
+Uint32 GameState::staticGpioTimerCallback(Uint32 interval, void* param) {
+    reinterpret_cast<GameState*>(param)->rpiGpio.pollAndDispatchKeyboardEvents();
+    return 1;
+}
 
 void GameState::resetGameState() {
     score = 0;
@@ -279,6 +290,9 @@ void GameState::resetGameState() {
     midBallPos = 0;
     innerBallPos = 7;
     gamePosition = 0;
+    willDropInner = false;
+    willDropMid = false;
+    willDropOuter = false;
     crashedLeft = false;
     crashedRight = false;
 }
@@ -366,6 +380,7 @@ void GameState::run(SDL_Renderer* renderer) {
             if (event.type == SDL_KEYDOWN) {
                 switch (event.key.keysym.sym) {
                 case SDLK_x:
+                    SDL_UnlockMutex(mutex);
                     return;
                 case SDLK_q:
                     moveArmsLeft();
