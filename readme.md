@@ -1,47 +1,144 @@
 # SDL Tossup simulator
 
+The project is a cross-platform recreation of the Game and Watch Toss Up simulator using SDL. The code is based on the Win32 Toss Up simulator by Brian Apps (http://brianapps.net/tossup).
 
 ## Building
 
-This project uses CMake and builds SDL from source rather than picking up preinstall binaries. 
+The project uses CMake and builds SDL from source rather than picking up preinstall binaries.
 
-### 1. Download SDL source
+
+### Windows - Visual Studio
+
+ 1. Download the SDL source (https://www.libsdl.org/release/SDL2-2.0.12.zip) and unzip this so it is under `external\SDL2-2.0.12`.
+ 2. Ensure Visual Studio 2019 has the CMake option has been installed.
+ 3. Open this source folder and CMake should configure the project it can be built in the normal way.
 
 The SDL source should we placed under `external\SDL2-2.0.12`.
 
-#### Windows
+### Linux/Mac
 
-If you have curl and unzip install you can do this from the command line.
-```
-md external
-cd external
-curl -O https://www.libsdl.org/release/SDL2-2.0.12.zip
-unzip SDL2-2.0.12.zip
-```
+In short the process is.
+ 1. Fetch the source code for this project.
+ 1. Download the SDL source (https://www.libsdl.org/release/SDL2-2.0.12.zip) and unzip this so it is under `external\SDL2-2.0.12`.
+ 1. Run CMake in an out of source directory and build.
 
-#### Linux/Raspberry/Mac
+This can be achieved as follows:
 
 ```
+git clone ....
+cd sdlTossup
 mkdir external
 cd external
 curl https://www.libsdl.org/release/SDL2-2.0.12.tar.gz | tar zxv
-```
-
-### 2. Build from Command line
-
-**Windows** Download Visual Studio and make sure the CMake option is included.
-
-```
-md build
+cd ..
+mkdir build
 cd build
-"c:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\Tools\vsdevcmd"
-cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build .
+cmake ..
+cmake --build . -- -j8
 ```
 
-This should create `SDLTossup.exe`.
+### Raspberry Pi
 
-_Note:_ the location of the `vsdevcmd.bat` batch file varies between installations but usually takes the form `c:\Program Files (x86)\Microsoft Visual Studio\[VS Version]\[VS Type]\Common7\Tools\vsdevcmd"`
+The project has been tested using OpenGLES on various devices. It may work under X11 but this hasn't been tested. The recommended approach to run this program on a Raspbian Lite command line only image.
+
+Install WiringPi if you wish you the GPIO ports.
+
+Follow the same steps as the Linux build.
+
+```
+git clone ....
+cd sdlTossup
+mkdir external
+cd external
+curl https://www.libsdl.org/release/SDL2-2.0.12.tar.gz | tar zxv
+cd ..
+mkdir build
+cd build
+cmake ..
+cmake --build . -- -j4
+```
 
 
+### Cross compile for Raspberry Pi
 
+It is possible to cross compile the project 
+
+
+1. Fix up the SDL CMake scripts. At the time of writing there's a little issue with the CMake scripts that prevent the correct configuration for cross-compile build. To fix this edit `SDL2-2.0.12/cmake/sdlchecks.cmake` and change the five places where `/opt/vc` is specified with `{CMAKE_SYSROOT}/opt/vc`. These are all in the `CheckRPI` macro.
+2. Create a CMake toolchain file, name `RpiToolchain.cmake`
+   ```
+   set(CMAKE_SYSTEM_NAME Linux)
+   set(CMAKE_SYSTEM_PROCESSOR arm)
+
+   #set(CMAKE_SYSROOT /Apps/SysGCC/newsysroot)
+   set(CMAKE_SYSROOT /Apps/SysGCC/raspberry/arm-linux-gnueabihf/sysroot)
+
+   set(tools /Apps/SysGCC/raspberry)
+   set(CMAKE_C_COMPILER /Apps/SysGCC/raspberry/bin/arm-linux-gnueabihf-gcc.exe)
+   set(CMAKE_CXX_COMPILER /Apps/SysGCC/raspberry/bin/arm-linux-gnueabihf-g++.exe)
+
+   set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+   set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+   set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+   set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+   ```
+
+## Running
+
+To run the program execute `SDLTossup`. While running the following keys can be used:
+
+| Key | Function        |
+| --- | --------------- |
+| Q   | Move arms left  |
+| P   | Move arms right |
+| A   | Start Game A    |
+| B   | Start Game B    |
+| T   | Enter time mode |
+| X   | Exit            |
+
+The Raspberry Pi version allows key functions to be read directly from the GPIO pins. See the Raspberry Pi GPIO section below.
+
+### Command line options
+
+```
+SDLTossup [-f] [-d <display_index>] [-s <subsamples>] [-lcd <hexcolour>] [-back <hexcolour>] [<width> <height>]
+```
+
+Where
+
+| Option     | Description                                                                          |
+| ---------- | ------------------------------------------------------------------------------------ |
+| -f         | run game in fullscreen mode.                                                         |
+| -d         | display game on the monitor given by `<display_index>.`                              |
+| -s         | size `<subsamples>` by `<subsamples>` grid used for anti-aliasing. Can be 1 to 15.   |
+| -lcd       | the colour in as an BBGGRR hex string for the LCD elements. Defaults to 424242.      |
+| -back      | the colour in as an BBGGRR hex string for the screen background. Defaults to 708080. |
+| -info      | Show display and audio info and then exit.                                           |
+| `<width>`  | width of the game texture.                                                           |
+| `<height>` | height of the game texture.                                                          |
+
+# Raspberry PI GPIO
+
+The Raspberry Pi version allows the game functions to be read directly from the GPIO pins. This allows custom controller to be developed that don't need to emulate a keyboard.
+
+The [Wiring Pi](http://wiringpi.com/) library is used to read the GPIO pins and should be installed before building the program.
+
+6 pins are used for input and they all are configured to use the Pi's internal pull down resistors. The each (normally open) switch should therefore be wired to 3v3 (pin 1) via a current limiting resistor (say 270 ohms). The pins numbering follows the BCM scheme (see https://pinout.xyz for details).
+
+| GPIO Number | Physical Pin Number | id  | Function   |
+| ----------- | ------------------- | --- | ---------- |
+| BCM 17      | 11                  | L   | Move left  |
+| BCM 27      | 13                  | R   | Move right |
+| BCM 22      | 15                  | A   | Game A     |
+| BCM 23      | 16                  | B   | Game B     |
+| BCM 24      | 18                  | T   | Time       |
+| BCM 25      | 22                  | X   | Exit       |
+
+ASCII art of the connection I use on the pi zero is as follows. (Note `<`, `>` and `0` refer to the pins used to get audio output from the pi zero, see https://learn.adafruit.com/adding-basic-audio-ouput-to-raspberry-pi-zero.)
+
+```
+02 04 06 08 10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40
+.  .  .  .  .  <  .  B  T  .  X  .  .  .  .  .  0  .  .  .
++  .  .  .  .  L  R  A  .  .  .  .  .  .  .  .  >  .  .  .
+01 03 05 07 09 11 13 15 17 19 21 23 25 27 29 31 33 35 37 39
+```
