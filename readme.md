@@ -39,9 +39,13 @@ cmake --build . -- -j8
 
 ### Raspberry Pi
 
-The project has been tested using OpenGLES on various devices. It may work under X11 but this hasn't been tested. The recommended approach to run this program on a Raspbian Lite command line only image.
+The project has been tested using OpenGLES on various devices. It may work under X11 but this hasn't been tested. The recommended approach to run this program on a Raspbian Lite image (Buster at the time of writing).
 
-Install WiringPi if you wish you the GPIO ports.
+Install the libraries. WiringPi can be omitted if you do not intend to use the GPIO ports to control the game.
+
+```
+sudo apt-get install cmake libasound2-dev libudev-dev wiringpi
+```
 
 Follow the same steps as the Linux build.
 
@@ -65,13 +69,19 @@ It is possible to cross compile the project
 
 
 1. Fix up the SDL CMake scripts. At the time of writing there's a little issue with the CMake scripts that prevent the correct configuration for cross-compile build. To fix this edit `SDL2-2.0.12/cmake/sdlchecks.cmake` and change the five places where `/opt/vc` is specified with `{CMAKE_SYSROOT}/opt/vc`. These are all in the `CheckRPI` macro.
-2. Create a CMake toolchain file, name `RpiToolchain.cmake`
+1. Update the sysroot on the local machine. It appears the `UpdateSysroot` tool no longer ships with the cross compiler so this can be done manually by taring it up:
+   ```
+   tar -chf sysroot.tar --hard-dereference  /etc/ld.so.conf /opt/vc /lib /usr/include /usr/lib /usr/include /usr/local/lib /usr/local/
+   ```
+   (Ignore the _removing leading '/'_ warning and and 'ssl/private permission denied error). Then transferring the tar file over and unpacking it to a suitable directory (e.g. `C:\SysGCC\rasbperry\newsysroot`).
+
+   **Note:** the above might not work if `ld.so.conf` uses includes and the workaround is to create a single file that has the content of all the includes.
+1. Create a CMake toolchain file, name `RpiToolchain.cmake`
    ```
    set(CMAKE_SYSTEM_NAME Linux)
    set(CMAKE_SYSTEM_PROCESSOR arm)
 
-   #set(CMAKE_SYSROOT /Apps/SysGCC/newsysroot)
-   set(CMAKE_SYSROOT /Apps/SysGCC/raspberry/arm-linux-gnueabihf/sysroot)
+   set(CMAKE_SYSROOT /Apps/SysGCC/newsysroot)
 
    set(tools /Apps/SysGCC/raspberry)
    set(CMAKE_C_COMPILER /Apps/SysGCC/raspberry/bin/arm-linux-gnueabihf-gcc.exe)
