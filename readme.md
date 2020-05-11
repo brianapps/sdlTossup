@@ -65,17 +65,17 @@ cmake --build . -- -j4
 
 ### Cross compile for Raspberry Pi
 
-It is possible to cross compile the project 
+It is possible to cross compile the project. The steps below use a prebuilt cross compiler from 
 
 
 1. Fix up the SDL CMake scripts. At the time of writing there's a little issue with the CMake scripts that prevent the correct configuration for cross-compile build. To fix this edit `SDL2-2.0.12/cmake/sdlchecks.cmake` and change the five places where `/opt/vc` is specified with `{CMAKE_SYSROOT}/opt/vc`. These are all in the `CheckRPI` macro.
 1. Update the sysroot on the local machine. It appears the `UpdateSysroot` tool no longer ships with the cross compiler so this can be done manually by taring it up:
    ```
-   tar -chf sysroot.tar --hard-dereference  /etc/ld.so.conf /opt/vc /lib /usr/include /usr/lib /usr/include /usr/local/lib /usr/local/
+   tar -chf sysroot.tar --hard-dereference  /etc/ld.so.conf* /opt/vc /lib /usr/include /usr/lib /usr/include /usr/local/lib /usr/local/
    ```
    (Ignore the _removing leading '/'_ warning and and 'ssl/private permission denied error). Then transferring the tar file over and unpacking it to a suitable directory (e.g. `C:\SysGCC\rasbperry\newsysroot`).
 
-   **Note:** the above might not work if `ld.so.conf` uses includes and the workaround is to create a single file that has the content of all the includes.
+   **Note:** the above might not work if `ld.so.conf` uses includes and the workaround is to create a single file that has the content of all the includes. e.g. something like `(for %i in (ld.so.config.d\*) do @type %i) > ld.so.conf`.
 1. Create a CMake toolchain file, name `RpiToolchain.cmake`
    ```
    set(CMAKE_SYSTEM_NAME Linux)
@@ -91,6 +91,13 @@ It is possible to cross compile the project
    set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
    set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
    set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+   ```
+4. Build with something like
+   ```
+   md rpi
+   cd rpi
+   cmake -G Ninja -CMAKE_TOOLCHAIN_FILE=..\RpiToolchain.cmake -DCMAKE_BUILD_TYPE=Release ..
+   cmake --build .
    ```
 
 ## Running
